@@ -79,6 +79,7 @@ void AllocateMemory(float vectorSize)
 	//Setting the vector to zero so the ectra values will not affect the dot product.
 	memset(???);
 	memset(???);
+	cudaMemset(???);
 }
 
 //Loads values into vectors that we will add.

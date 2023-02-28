@@ -1,5 +1,4 @@
-//nvcc RayTracer.cu -o temp -lglut -lGL -lm
-
+//nvcc RayTracerConstantMemoryEventTiming.cu -o temp -lglut -lGL -lm
 #include <GL/glut.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -9,6 +8,7 @@
 
 #define WINDOWWIDTH 1024
 #define WINDOWHEIGHT 1024
+
 #define XMIN -1.0f
 #define XMAX 1.0f
 #define YMIN -1.0f
@@ -16,7 +16,7 @@
 #define ZMIN -1.0f
 #define ZMAX 1.0f
 
-#define NUMSPHERES 20
+#define NUMSPHERES 2000
 
 struct sphereStruct 
 {
@@ -29,9 +29,12 @@ static int Window;
 unsigned int WindowWidth = WINDOWWIDTH;
 unsigned int WindowHeight = WINDOWHEIGHT;
 
+cudaEvent_t Start, Stop;
+
 dim3 BlockSize, GridSize;
 float *PixelsCPU, *PixelsGPU; 
-sphereStruct *SpheresCPU, *SpheresGPU;
+sphereStruct *SpheresCPU;
+__constant__ sphereStruct SpheresGPU[NUMSPHERES];
 
 // prototyping functions
 void Display();
@@ -56,6 +59,16 @@ void KeyPressed(unsigned char key, int x, int y)
 		glutDestroyWindow(Window);
 		printf("\nw Good Bye\n");
 		exit(0);
+		
+		cudaEventDestroy(Start);
+		myCudaErrorCheck(__FILE__, __LINE__);
+		cudaEventDestroy(Stop);
+		myCudaErrorCheck(__FILE__, __LINE__);
+		
+		cudaFree(PixelsGPU);
+		
+		free(PixelsCPU);
+		free(SpheresCPU);
 	}
 }
 
@@ -73,7 +86,7 @@ __device__ float hit(float pixelx, float pixely, float *dimingValue, sphereStruc
 	return (ZMIN- 1.0); //If the ray doesn't hit anything return a number behind the box.
 }
 
-__global__ void makeSphersBitMap(float *pixels, sphereStruct *sphereInfo)
+__global__ void makeSphersBitMap(float *pixels)
 {
 	float stepSizeX = (XMAX - XMIN)/((float)WINDOWWIDTH - 1);
 	float stepSizeY = (YMAX - YMIN)/((float)WINDOWHEIGHT - 1);
@@ -94,19 +107,17 @@ __global__ void makeSphersBitMap(float *pixels, sphereStruct *sphereInfo)
 	float maxHit = ZMIN -1.0f; // Initializing it to be out of the back of the box.
 	for(int i = 0; i < NUMSPHERES; i++)
 	{
-		//hitValue = hit(pixelx, pixely, &dimingValue, sphereInfo[i].x, sphereInfo[i].y, sphereInfo[i].z, sphereInfo[i].radius); 
-		hitValue = hit(pixelx, pixely, &dimingValue, sphereInfo[i]);
+		hitValue = hit(pixelx, pixely, &dimingValue, SpheresGPU[i]);
 		// do we hit any spheres? If so, how close are we to the center? (i.e. n)
 		if(maxHit < hitValue)
 		{
 			// Setting the RGB value of the sphere but also diming it as it gets close to the side of the sphere.
-			pixelr = sphereInfo[i].r * dimingValue; 	
-			pixelg = sphereInfo[i].g * dimingValue;	
-			pixelb = sphereInfo[i].b * dimingValue; 	
+			pixelr = SpheresGPU[i].r * dimingValue; 	
+			pixelg = SpheresGPU[i].g * dimingValue;	
+			pixelb = SpheresGPU[i].b * dimingValue; 	
 			maxHit = hitValue; // reset maxHit value to be the current closest sphere
 		}
 	}
-	
 	pixels[id] = pixelr;
 	pixels[id+1] = pixelg;
 	pixels[id+2] = pixelb;
@@ -132,16 +143,28 @@ void makeRandomSpheres()
 
 void makeBitMap()
 {
-	cudaMemcpy(SpheresGPU, SpheresCPU, NUMSPHERES*sizeof(sphereStruct), cudaMemcpyHostToDevice);
+	cudaMemcpyToSymbol(SpheresGPU, SpheresCPU, NUMSPHERES*sizeof(sphereStruct));
 	myCudaErrorCheck(__FILE__, __LINE__);
 	
-	makeSphersBitMap<<<GridSize, BlockSize>>>(PixelsGPU, SpheresGPU);
+	makeSphersBitMap<<<GridSize, BlockSize>>>(PixelsGPU);
 	myCudaErrorCheck(__FILE__, __LINE__);
 	
 	cudaMemcpyAsync(PixelsCPU, PixelsGPU, WINDOWWIDTH*WINDOWHEIGHT*3*sizeof(float), cudaMemcpyDeviceToHost);
 	myCudaErrorCheck(__FILE__, __LINE__);
 	
 	paintScreen();
+	
+	cudaEventRecord(Stop, 0);
+	myCudaErrorCheck(__FILE__, __LINE__);
+	
+	cudaEventSynchronize(Stop);
+	myCudaErrorCheck(__FILE__, __LINE__);
+	
+	float time;
+	cudaEventElapsedTime(&time, Start, Stop);
+	myCudaErrorCheck(__FILE__, __LINE__);
+	
+	printf("\n Time on GPU = %3.1f milliseconds", time);
 }
 
 void paintScreen()
@@ -159,7 +182,7 @@ void setup()
 	myCudaErrorCheck(__FILE__, __LINE__);
 	
 	SpheresCPU= (sphereStruct*)malloc(NUMSPHERES*sizeof(sphereStruct));
-	cudaMalloc(&SpheresGPU, NUMSPHERES*sizeof(sphereStruct));
+	//cudaMalloc(&SpheresGPU, NUMSPHERES*sizeof(sphereStruct));
 	myCudaErrorCheck(__FILE__, __LINE__);
 	
 	//Threads in a block
@@ -186,6 +209,15 @@ void setup()
 
 int main(int argc, char** argv)
 { 
+	cudaEventCreate(&Start);
+	myCudaErrorCheck(__FILE__, __LINE__);
+	
+	cudaEventCreate(&Stop);
+	myCudaErrorCheck(__FILE__, __LINE__);
+	
+	cudaEventRecord(Start, 0);
+	myCudaErrorCheck(__FILE__, __LINE__);
+	
 	setup();
 	makeRandomSpheres();
    	glutInit(&argc, argv);

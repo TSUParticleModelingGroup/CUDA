@@ -1,4 +1,4 @@
-//nvcc RayTracer.cu -o temp -lglut -lGL -lm
+//nvcc RayTracerEventTiming.cu -o temp -lglut -lGL -lm
 
 #include <GL/glut.h>
 #include <stdlib.h>
@@ -16,7 +16,7 @@
 #define ZMIN -1.0f
 #define ZMAX 1.0f
 
-#define NUMSPHERES 20
+#define NUMSPHERES 2000
 
 struct sphereStruct 
 {
@@ -32,6 +32,8 @@ unsigned int WindowHeight = WINDOWHEIGHT;
 dim3 BlockSize, GridSize;
 float *PixelsCPU, *PixelsGPU; 
 sphereStruct *SpheresCPU, *SpheresGPU;
+
+cudaEvent_t Start, Stop;
 
 // prototyping functions
 void Display();
@@ -56,6 +58,17 @@ void KeyPressed(unsigned char key, int x, int y)
 		glutDestroyWindow(Window);
 		printf("\nw Good Bye\n");
 		exit(0);
+		
+		cudaEventDestroy(Start);
+		myCudaErrorCheck(__FILE__, __LINE__);
+		cudaEventDestroy(Stop);
+		myCudaErrorCheck(__FILE__, __LINE__);
+		
+		cudaFree(PixelsGPU);
+		cudaFree(SpheresGPU);
+		
+		free(PixelsCPU);
+		free(SpheresCPU);
 	}
 }
 
@@ -142,6 +155,18 @@ void makeBitMap()
 	myCudaErrorCheck(__FILE__, __LINE__);
 	
 	paintScreen();
+	
+	cudaEventRecord(Stop, 0);
+	myCudaErrorCheck(__FILE__, __LINE__);
+	
+	cudaEventSynchronize(Stop);
+	myCudaErrorCheck(__FILE__, __LINE__);
+	
+	float time;
+	cudaEventElapsedTime(&time, Start, Stop);
+	myCudaErrorCheck(__FILE__, __LINE__);
+	
+	printf("\n Time on GPU = %3.1f milliseconds", time);
 }
 
 void paintScreen()
@@ -153,6 +178,15 @@ void paintScreen()
 
 void setup()
 {
+	cudaEventCreate(&Start);
+	myCudaErrorCheck(__FILE__, __LINE__);
+	
+	cudaEventCreate(&Stop);
+	myCudaErrorCheck(__FILE__, __LINE__);
+	
+	cudaEventRecord(Start, 0);
+	myCudaErrorCheck(__FILE__, __LINE__);
+	
 	//We need the 3 because each pixel has a red, green, and blue value.
 	PixelsCPU = (float *)malloc(WINDOWWIDTH*WINDOWHEIGHT*3*sizeof(float));
 	cudaMalloc(&PixelsGPU,WINDOWWIDTH*WINDOWHEIGHT*3*sizeof(float));

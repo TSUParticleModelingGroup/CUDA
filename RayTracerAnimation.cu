@@ -1,4 +1,4 @@
-//nvcc RayTracer.cu -o temp -lglut -lGL -lm
+//nvcc RayTracerAnimation.cu -o Regular -lglut -lGL -lm
 
 #include <GL/glut.h>
 #include <stdlib.h>
@@ -16,7 +16,10 @@
 #define ZMIN -1.0f
 #define ZMAX 1.0f
 
-#define NUMSPHERES 20
+#define MAXRADIUS ((XMAX- XMIN)*0.1)
+#define MINRADIUS (MAXRADIUS*0.5)
+#define NUMSPHERES 100
+#define STEPS 1000
 
 struct sphereStruct 
 {
@@ -31,7 +34,7 @@ unsigned int WindowHeight = WINDOWHEIGHT;
 
 dim3 BlockSize, GridSize;
 float *PixelsCPU, *PixelsGPU; 
-sphereStruct *SpheresCPU, *SpheresGPU;
+sphereStruct *SpheresCPU, *SpheresCPUNext, *SpheresGPU;
 
 // prototyping functions
 void Display();
@@ -39,14 +42,21 @@ void idle();
 void KeyPressed(unsigned char , int , int );
 __device__ float hit(float , float , float *, float , float , float , float );
 __global__ void makeSphersBitMap(float *, sphereStruct *);
-void makeRandomSpheres();
+void makeRandomSpheres(sphereStruct *sphere);
+void animateBitMap();
 void makeBitMap();
 void paintScreen();
 void setup();
 
+void idle()
+{
+	animateBitMap();
+}
+
 void display()
 {
-	makeBitMap();	
+	//animateBitMap();
+	paintScreen();	
 }
 
 void KeyPressed(unsigned char key, int x, int y)
@@ -54,7 +64,7 @@ void KeyPressed(unsigned char key, int x, int y)
 	if(key == 'q')
 	{
 		glutDestroyWindow(Window);
-		printf("\nw Good Bye\n");
+		printf("\n Good Bye\n");
 		exit(0);
 	}
 }
@@ -112,7 +122,7 @@ __global__ void makeSphersBitMap(float *pixels, sphereStruct *sphereInfo)
 	pixels[id+2] = pixelb;
 }
 
-void makeRandomSpheres()
+void makeRandomSpheres(sphereStruct *sphere)
 {	
 	float rangeX = XMAX - XMIN;
 	float rangeY = YMAX - YMIN;
@@ -120,13 +130,47 @@ void makeRandomSpheres()
 	
 	for(int i = 0; i < NUMSPHERES; i++)
 	{
-		SpheresCPU[i].x = (rangeX*rand()/RAND_MAX) + XMIN;
-		SpheresCPU[i].y = (rangeY*rand()/RAND_MAX) + YMIN;
-		SpheresCPU[i].z = (rangeZ*rand()/RAND_MAX) + ZMIN;
-		SpheresCPU[i].r = 1.0*rand()/RAND_MAX;
-		SpheresCPU[i].g = 1.0*rand()/RAND_MAX;
-		SpheresCPU[i].b = 1.0*rand()/RAND_MAX;
-		SpheresCPU[i].radius = (0.5*rand()/RAND_MAX) + 0.1; //Make sure radius is nonzero
+		sphere[i].x = (rangeX*rand()/RAND_MAX) + XMIN;
+		sphere[i].y = (rangeY*rand()/RAND_MAX) + YMIN;
+		sphere[i].z = (rangeZ*rand()/RAND_MAX) + ZMIN;
+		sphere[i].r = 1.0*rand()/RAND_MAX;
+		sphere[i].g = 1.0*rand()/RAND_MAX;
+		sphere[i].b = 1.0*rand()/RAND_MAX;
+		sphere[i].radius = ((MAXRADIUS - MINRADIUS)*rand()/RAND_MAX) + MINRADIUS;
+	}
+}
+
+void animateBitMap()
+{
+	makeRandomSpheres(SpheresCPUNext);
+	float dx[NUMSPHERES], dy[NUMSPHERES], dz[NUMSPHERES], dradius[NUMSPHERES], dr[NUMSPHERES], dg[NUMSPHERES], db[NUMSPHERES];
+	
+	for(int i = 0; i < NUMSPHERES; i++)
+	{
+		dx[i] = (SpheresCPUNext[i].x - SpheresCPU[i].x)/STEPS;
+		dy[i] = (SpheresCPUNext[i].y - SpheresCPU[i].y)/STEPS;
+		dz[i] = (SpheresCPUNext[i].z - SpheresCPU[i].z)/STEPS;
+		dradius[i] = (SpheresCPUNext[i].radius - SpheresCPU[i].radius)/STEPS;
+		dr[i] = (SpheresCPUNext[i].r - SpheresCPU[i].r)/STEPS;
+		dg[i] = (SpheresCPUNext[i].g - SpheresCPU[i].g)/STEPS;
+		db[i] = (SpheresCPUNext[i].b - SpheresCPU[i].b)/STEPS;
+	}
+	
+	makeBitMap();
+	
+	for(int j = 0; j < STEPS; j++)
+	{
+		for(int i = 0; i < NUMSPHERES; i++)
+		{
+			SpheresCPU[i].x += dx[i];
+			SpheresCPU[i].y += dy[i];
+			SpheresCPU[i].z += dz[i];
+			SpheresCPU[i].radius += dradius[i];
+			SpheresCPU[i].r += dr[i];
+			SpheresCPU[i].g += dg[i];
+			SpheresCPU[i].b += db[i];
+		}
+		makeBitMap();
 	}
 }	
 
@@ -158,7 +202,8 @@ void setup()
 	cudaMalloc(&PixelsGPU,WINDOWWIDTH*WINDOWHEIGHT*3*sizeof(float));
 	myCudaErrorCheck(__FILE__, __LINE__);
 	
-	SpheresCPU= (sphereStruct*)malloc(NUMSPHERES*sizeof(sphereStruct));
+	SpheresCPU = (sphereStruct*)malloc(NUMSPHERES*sizeof(sphereStruct));
+	SpheresCPUNext = (sphereStruct*)malloc(NUMSPHERES*sizeof(sphereStruct));
 	cudaMalloc(&SpheresGPU, NUMSPHERES*sizeof(sphereStruct));
 	myCudaErrorCheck(__FILE__, __LINE__);
 	
@@ -187,7 +232,8 @@ void setup()
 int main(int argc, char** argv)
 { 
 	setup();
-	makeRandomSpheres();
+	//makeRandomSpheres();
+	makeRandomSpheres(SpheresCPU);
    	glutInit(&argc, argv);
 	glutInitDisplayMode(GLUT_RGB | GLUT_SINGLE);
    	glutInitWindowSize(WINDOWWIDTH, WINDOWHEIGHT);
@@ -196,7 +242,7 @@ int main(int argc, char** argv)
    	glutDisplayFunc(display);
 	//glutReshapeFunc(reshape);
 	//glutMouseFunc(mymouse);
-	//glutIdleFunc(idle);
+	glutIdleFunc(idle);
    	glutMainLoop();
 }
 

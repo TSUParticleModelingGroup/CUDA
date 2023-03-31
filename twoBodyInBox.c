@@ -58,7 +58,7 @@ void set_initail_conditions()
 		py2 = (LENGTH_OF_BOX - DIAMETER)*rand()/RAND_MAX - (LENGTH_OF_BOX - DIAMETER)/2.0;
 		pz2 = (LENGTH_OF_BOX - DIAMETER)*rand()/RAND_MAX - (LENGTH_OF_BOX - DIAMETER)/2.0;
 		
-		dx = px2 - px2;
+		dx = px2 - px1;
 		dy = py2 - py1;
 		dz = pz2 - pz1;
 		seperation = sqrt(dx*dx + dy*dy + dz*dz);
